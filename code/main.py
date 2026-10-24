@@ -230,7 +230,7 @@ def record_identity_match(obj: Any, aliases: set[str], uid: str) -> bool:
             if alias.isdigit():
                 if any(re.sub(r"\D", "", v) == alias for v in values):
                     return True
-            elif any(v == alias or re.search(r"(?<!\\w)" + re.escape(alias) + r"(?!\\w)", v, re.I) for v in values):
+            elif any(v == alias or re.search(r"(?<!\w)" + re.escape(alias) + r"(?!\w)", v, re.I) for v in values):
                 return True
     return bool(uid and any(re.search(rf"(?<![A-Za-z0-9_]){re.escape(uid)}(?![A-Za-z0-9_])", v, re.I) for v in values))
 
@@ -616,8 +616,8 @@ def run(dataset: Path, output: Path) -> None:
     evidence, manifest, coverage = load_evidence(dataset)
     activity_links = activity_resource_links(dataset, aliases_by_user)
     padded_account_ids = any(
-        (m := re.fullmatch(r"account_(\\d+)", str(item.get("resource_id", ""))))
-        and (u := re.fullmatch(r"user_(\\d+)", str(item.get("record", {}).get("user_id", ""))))
+        (m := re.fullmatch(r"account_(\d+)", str(item.get("resource_id", ""))))
+        and (u := re.fullmatch(r"user_(\d+)", str(item.get("record", {}).get("user_id", ""))))
         and len(u.group(1)) <= 2 and len(m.group(1)) == 3 and int(m.group(1)) == int(u.group(1))
         for item in evidence if isinstance(item.get("record"), dict)
     )
@@ -663,7 +663,7 @@ def run(dataset: Path, output: Path) -> None:
                     item["record"]["_identity_match"] = True
                     items.append(item)
             if padded_account_ids and not any(i["category"] == "USER_PROFILE" for i in items):
-                account_number = re.fullmatch(r"user_(\\d+)", uid)
+                account_number = re.fullmatch(r"user_(\d+)", uid)
                 if account_number and len(account_number.group(1)) <= 2:
                     candidate = f"account_{int(account_number.group(1)):03d}"
                     latest_coverage = [x for x in coverage if x["system"] == "account_service" and
