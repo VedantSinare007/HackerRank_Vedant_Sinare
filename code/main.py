@@ -648,23 +648,29 @@ def activity_resource_links(dataset: Path, aliases_by_user: dict[str, set[str]])
     return linked
 
 def nearby_activity_resources(dataset: Path, req: dict[str, str]) -> set[str]:
-    """Link records to a request through nearby deletion-workflow events; never trust their outcome as state."""
+    """Use a tightly bounded deletion-event batch as a resource-discovery hint, not as state proof."""
     reported = parse_time(req.get("reported_at"))
     cutoff = parse_time(req.get("audit_at"))
     if reported is None:
         return set()
-    allowed = {"DELETE_RECORD", "ANONYMIZE_RECORD", "REDACT_RECORD",
-               "DISABLE_DATA_FLOW", "BLOCK_RESTORE", "CHECK_DATA_FLOW", "CHECK_RESTORE_ACCESS"}
-    linked: set[str] = set()
-    for row in read_csv(dataset / "system_activity.csv"):
-        if row.get("event_type") not in allowed or not row.get("resource_id"):
-            continue
+    rows = read_csv(dataset / "system_activity.csv")
+    window = 300
+    batch = []
+    for row in rows:
         when = parse_time(row.get("event_time"))
         if when is None or (cutoff and when > cutoff):
             continue
-        if abs((when - reported).total_seconds()) <= 7200:
-            linked.add(row["resource_id"])
-    return linked
+        if abs((when - reported).total_seconds()) <= window:
+            batch.append(row)
+    # Require the request's primary-account action as an anchor before considering sibling
+    # operations in the same short deletion batch.
+    if not any(row.get("system_id") == "account_service" and row.get("event_type") == "DELETE_RECORD"
+               for row in batch):
+        return set()
+    allowed = {"DELETE_RECORD", "ANONYMIZE_RECORD", "REDACT_RECORD",
+               "DISABLE_DATA_FLOW", "BLOCK_RESTORE", "CHECK_DATA_FLOW", "CHECK_RESTORE_ACCESS"}
+    return {row["resource_id"] for row in batch
+            if row.get("event_type") in allowed and row.get("resource_id")}
 
 def run(dataset: Path, output: Path) -> None:
     requests = read_csv(dataset / "deletion_requests.csv")
@@ -690,6 +696,7 @@ def run(dataset: Path, output: Path) -> None:
         elif uid:
             items = []
             cutoff = parse_time(req.get("audit_at"))
+            nearby_resources = nearby_activity_resources(dataset, req)
             aliases = {email}
             identity = users.get(uid, {})
             identity_updated = parse_time(identity.get("updated_at"))
@@ -713,7 +720,8 @@ def run(dataset: Path, output: Path) -> None:
                 matched = record_identity_match(item["record"], aliases, uid)
                 linked_at = activity_links.get(uid, {}).get(item["resource_id"])
                 linked = linked_at is not None and (cutoff is None or linked_at <= cutoff)
-                if matched or linked:
+                temporal_link = item["resource_id"] in nearby_resources
+                if matched or linked or temporal_link:
                     item = dict(item)
                     item["record"] = dict(item["record"]) if isinstance(item["record"], dict) else {"raw": item["record"]}
                     if matched or linked:
