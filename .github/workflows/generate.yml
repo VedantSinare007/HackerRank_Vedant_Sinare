@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths-ignore:
       - output.csv
+      - dataset/**
       - code/evaluation/evaluation_report.md
       - code/evaluation/usage_report.md
   workflow_dispatch:
@@ -31,14 +32,17 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pillow pytesseract pypdf
 
-      - name: Fetch participant-facing challenge dataset
-        run: git clone --depth 1 https://github.com/interviewstreet/hackerrank-orchestrate-october26.git upstream
+      - name: Fetch and keep the complete participant-facing dataset
+        run: |
+          git clone --depth 1 https://github.com/interviewstreet/hackerrank-orchestrate-october26.git upstream
+          mkdir -p dataset
+          cp -a upstream/dataset/. dataset/
 
       - name: Generate predictions for every request
-        run: python code/main.py --dataset upstream/dataset --output output.csv
+        run: python code/main.py --dataset dataset --output output.csv
 
       - name: Evaluate public sample and write reports
-        run: python code/evaluation/main.py --dataset upstream/dataset --predictions output.csv
+        run: python code/evaluation/main.py --dataset dataset --predictions output.csv
 
       - name: Package code without the dataset
         run: zip -r code.zip README.md code -x "*/__pycache__/*" "*/.venv/*" "*/venv/*" "*/node_modules/*" "*/.git/*" "*.pyc"
@@ -56,7 +60,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add output.csv code/evaluation/evaluation_report.md code/evaluation/usage_report.md
+          git add dataset output.csv code/evaluation/evaluation_report.md code/evaluation/usage_report.md
           if ! git diff --cached --quiet; then
             git commit -m "Generate deletion audit predictions and reports"
             git push
