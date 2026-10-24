@@ -202,8 +202,12 @@ def infer_line_category(line: str, service: str = "") -> str:
 def record_identity_match(obj: Any, aliases: set[str], uid: str) -> bool:
     values = [x.casefold() for _, x in flatten_strings(obj)]
     for alias in aliases:
-        if len(alias) >= 4 and any(alias in v for v in values):
-            return True
+        if len(alias) >= 4:
+            if alias.isdigit():
+                if any(re.sub(r"\D", "", v) == alias for v in values):
+                    return True
+            elif any(alias in v for v in values):
+                return True
     return bool(uid and any(re.search(rf"(?<![A-Za-z0-9_]){re.escape(uid)}(?![A-Za-z0-9_])", v, re.I) for v in values))
 
 def sql_records(path: Path, evidence_id: str, captured_at: dt.datetime) -> list[dict[str, Any]]:
@@ -247,10 +251,10 @@ def json_records(obj: Any, evidence_id: str, captured_at: dt.datetime) -> list[d
             sys_value = node.get("data_store") or node.get("system") or node.get("origin_system") or inherited_system
             collection = node.get("collection") or node.get("collection_name") or node.get("table") or inherited_collection
             category = category_name(node.get("record_type"), node.get("category"), collection, sys_value)
-            resource = find_resource_id(node)
-            # Only emit leaf-like record objects so containers do not create duplicates.
-            has_children = any(isinstance(v, (list, dict)) for k, v in node.items() if k not in {"metrics", "recent_activity", "metadata"})
-            if resource and category and not has_children:
+            resource = node.get("resource_id") or node.get("record_id") or ""
+            # Container objects are not records; nested payloads such as search documents remain valid.
+            has_records = any(k in node for k in ("records", "snapshots"))
+            if resource and category and not has_records:
                 found.append({"system": system_name(sys_value, category=category), "resource_id": resource,
                               "category": category, "state": status_from(node, category), "record": node,
                               "evidence_id": evidence_id, "captured_at": captured_at})
@@ -550,10 +554,27 @@ def audit_request(req: dict[str, str], uid: str | None, evidence: list[dict[str,
         s["evidence_id"] = ""
     return status, order_steps(findings + remediations + checks)
 
+def activity_resource_links(dataset: Path, aliases_by_user: dict[str, set[str]]) -> dict[str, dict[str, dt.datetime | None]]:
+    # Identity-catalog rows are explicit identity-to-resource links; other activity outcomes remain claims.
+    linked: dict[str, dict[str, dt.datetime | None]] = defaultdict(dict)
+    activity_path = dataset / "system_activity.csv"
+    if not activity_path.exists():
+        return linked
+    for row in read_csv(activity_path):
+        if row.get("event_type") != "LINK_RESOURCE_IDENTITY":
+            continue
+        details = str(row.get("details", "")).casefold()
+        for uid, aliases in aliases_by_user.items():
+            if uid.casefold() in details or any(a and len(a) >= 4 and a in details for a in aliases):
+                if row.get("resource_id"):
+                    linked[uid][row["resource_id"]] = parse_time(row.get("event_time"))
+    return linked
+
 def run(dataset: Path, output: Path) -> None:
     requests = read_csv(dataset / "deletion_requests.csv")
     users, aliases_by_user, by_email = identity_index(dataset)
     evidence, manifest = load_evidence(dataset)
+    activity_links = activity_resource_links(dataset, aliases_by_user)
     rows = []
     for req in requests:
         email = norm_email(req.get("email", ""))
@@ -571,7 +592,7 @@ def run(dataset: Path, output: Path) -> None:
             for item in evidence:
                 if cutoff and item["captured_at"] > cutoff:
                     continue
-                if record_identity_match(item["record"], aliases_by_user.get(uid, set()), uid):
+                if record_identity_match(item["record"], aliases_by_user.get(uid, set()), uid) or (item["resource_id"] in activity_links.get(uid, {}) and (cutoff is None or activity_links[uid][item["resource_id"]] is None or activity_links[uid][item["resource_id"]] <= cutoff)):
                     items.append(item)
             # Keep the latest observed state for each resource/category within audit time.
             latest = {}
