@@ -66,7 +66,9 @@ Actions:
 * Committed the complete dataset corpus under dataset/; the submission ZIP continues to exclude the corpus.
 * Confirmed output schema, 518 rows, phase/operation ordering rules, and token usage report requirements against the problem statement.
 * Public sample after the first dataset-backed iteration measured 71.9% status accuracy and 15.6% exact-row accuracy; that iteration was affected by overbroad temporal evidence linkage.
-* Removed the risky temporal linkage and corrected the repository README. A new workflow run is generating and evaluating the revised output; final metrics will be reported after it completes.
+* Replaced broad two-hour temporal linkage with an optional five-minute deletion-batch hint that requires a nearby account-service deletion as an anchor; matching evidence still supplies the record state.
+* Final public-sample evaluation: status accuracy 25/32 (78.1%), step-level exact 81/193 (42.0%), field-level 883/1393 (63.4%), sequence and exact-row accuracy 6/32 (18.8%). The tightened batch iteration did not change the score relative to the preceding run.
+* Final full output contains 518 rows: COMPLETE=108, INCOMPLETE=406, NOT_APPLICABLE=4. GitHub Actions completed successfully and published code.zip without dataset/.
 
 Context:
 tool=Codex desktop
