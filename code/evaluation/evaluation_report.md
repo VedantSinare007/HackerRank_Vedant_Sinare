@@ -3,11 +3,11 @@
 ## Public sample validation
 
 - Sample cases: 32
-- Case-level deletion-status accuracy: 20/32 (62.5%)
-- Step-level exact accuracy: 60/193 (31.1%)
-- Field-level accuracy across step fields: 713/1456 (49.0%)
-- Sequence accuracy (entire ordered steps_json): 4/32 (12.5%)
-- Exact row accuracy (status and complete sequence): 12.5%
+- Case-level deletion-status accuracy: 22/32 (68.8%)
+- Step-level exact accuracy: 65/193 (33.7%)
+- Field-level accuracy across step fields: 756/1456 (51.9%)
+- Sequence accuracy (entire ordered steps_json): 5/32 (15.6%)
+- Exact row accuracy (status and complete sequence): 15.6%
 
 ## Additional participant-created evaluation cases
 
@@ -26,15 +26,15 @@ Custom intent cases passed: 5/5.
 - case_01: expected COMPLETE with 1 steps; predicted COMPLETE with 0 steps.
 - case_02: expected COMPLETE with 1 steps; predicted COMPLETE with 0 steps.
 - case_03: expected COMPLETE with 3 steps; predicted INCOMPLETE with 4 steps.
-- case_04: expected COMPLETE with 2 steps; predicted NOT_APPLICABLE with 0 steps.
+- case_04: expected COMPLETE with 2 steps; predicted COMPLETE with 0 steps.
 - case_06: expected INCOMPLETE with 4 steps; predicted INCOMPLETE with 6 steps.
 - case_07: expected INCOMPLETE with 4 steps; predicted INCOMPLETE with 3 steps.
 - case_08: expected INCOMPLETE with 4 steps; predicted INCOMPLETE with 3 steps.
 - case_09: expected INCOMPLETE with 5 steps; predicted INCOMPLETE with 3 steps.
 - case_10: expected INCOMPLETE with 4 steps; predicted COMPLETE with 0 steps.
-- case_12: expected INCOMPLETE with 5 steps; predicted NOT_APPLICABLE with 0 steps.
-- case_14: expected INCOMPLETE with 5 steps; predicted NOT_APPLICABLE with 0 steps.
-- case_15: expected INCOMPLETE with 5 steps; predicted NOT_APPLICABLE with 0 steps.
+- case_12: expected INCOMPLETE with 5 steps; predicted COMPLETE with 2 steps.
+- case_15: expected INCOMPLETE with 5 steps; predicted COMPLETE with 1 steps.
+- case_17: expected INCOMPLETE with 5 steps; predicted INCOMPLETE with 4 steps.
 
 ## Improvements made
 
@@ -47,5 +47,5 @@ Custom intent cases passed: 5/5.
 ## Full-dataset run
 
 - Prediction rows: 518
-- Status distribution: COMPLETE=118, INCOMPLETE=370, NOT_APPLICABLE=30
+- Status distribution: COMPLETE=124, INCOMPLETE=390, NOT_APPLICABLE=4
 - Hidden evaluation labels are not available; accuracy above is the public sample comparison only.
