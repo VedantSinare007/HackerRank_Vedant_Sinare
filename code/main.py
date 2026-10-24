@@ -28,7 +28,7 @@ POSITIVE_INTENT = re.compile(
     r"close my account|close this account|close the account|closed account|account closure|account.*close|"
     r"permanent account|permanently close|account.*(?:deleted|removed|erased|closed)|"
     r"wipe my account|clean .* personal details|clean .* personal data|"
-    r"(?:account|profile).{0,80}\\b(?:gone|not found|no longer exists|fully removed)\\b|"
+    r"(?:account|profile).{0,80}\b(?:gone|not found|no longer exists|fully removed)\b|"
     r"eliminaci[oó]n|eliminar mi cuenta|suprimir mi cuenta|"
     r"exclus[aã]o|excluir minha conta|elimina[cç][aã]o|"
     r"suppression définitive|suppression d[eû]finitive|supprimer mon compte|"
@@ -209,7 +209,8 @@ def status_from(obj: Any, category: str) -> str:
     for key in ("result", "state", "status", "account_status", "record_status", "deletion_state", "readback_result"):
         val = str(values.get(key, "") or "").upper()
         if val in {"NOT_FOUND", "ABSENT", "DELETED", "MISSING", "ROWS=0"}:
-            return "ABSENT"
+            if not (key == "account_status" and category == "ACCOUNT_TOMBSTONE"):
+                return "ABSENT"
         if val in {"REDACTED", "ANONYMIZED", "ANONYMIZED", "DISABLED", "BLOCKED", "ACTIVE", "IDENTIFIABLE", "FOUND", "PRESENT"}:
             return val
     if "enabled" in values:
@@ -314,7 +315,9 @@ def text_records(text: str, evidence_id: str, captured_at: dt.datetime) -> list[
         if not line.strip():
             continue
         # Structured service readbacks use a resource id and explicit result fields.
-        m = re.search(r"\bresource_id\s*=\s*['\"]?([A-Za-z][A-Za-z0-9_-]*_\d+)", line, re.I)
+        m = re.search(r"\b(?:resource_id|record_id|object_id|attachment_id|ticket_id|resource)\s*[:=]\s*['\"]?([A-Za-z][A-Za-z0-9_-]*_\d+)", line, re.I)
+        if not m:
+            m = re.search(r"\b((?:email_delivery|audit_record|data_flow|account|identity|search|cache|support|attachment|analytics|telemetry|export|marketing|legal|backup|tombstone)_\d+)\b", line, re.I)
         if m:
             resource = m.group(1)
             service_m = re.search(r"\bservice=([A-Za-z0-9_]+)", line, re.I)
