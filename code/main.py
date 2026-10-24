@@ -690,7 +690,6 @@ def run(dataset: Path, output: Path) -> None:
         elif uid:
             items = []
             cutoff = parse_time(req.get("audit_at"))
-            nearby_resources = nearby_activity_resources(dataset, req)
             aliases = {email}
             identity = users.get(uid, {})
             identity_updated = parse_time(identity.get("updated_at"))
@@ -714,8 +713,7 @@ def run(dataset: Path, output: Path) -> None:
                 matched = record_identity_match(item["record"], aliases, uid)
                 linked_at = activity_links.get(uid, {}).get(item["resource_id"])
                 linked = linked_at is not None and (cutoff is None or linked_at <= cutoff)
-                temporal_link = item["resource_id"] in nearby_resources
-                if matched or linked or temporal_link:
+                if matched or linked:
                     item = dict(item)
                     item["record"] = dict(item["record"]) if isinstance(item["record"], dict) else {"raw": item["record"]}
                     if matched or linked:
