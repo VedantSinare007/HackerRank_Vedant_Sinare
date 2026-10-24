@@ -52,3 +52,25 @@ model=GPT-6
 branch=main
 repo_root=https://github.com/VedantSinare007/HackerRank_Vedant_Sinare
 parent_agent=none
+
+
+## [2026-10-24T17:00:00Z] Dataset-backed evaluation and evidence-link refinement
+
+User Prompt (verbatim, secrets redacted):
+i think you forgot to clone and use the given dataset mainly deletion_requests.csv, try cloning all dataset in my repository and try again i think it will help. And also you can have a look at problem statement once again so it will be easy for you and we can more than our current accuracy (68.8% status accuracy and 15.6% exact-row accuracy)
+
+Agent Response Summary:
+Re-read the full problem statement and reran the workflow using the complete participant-facing dataset committed in the repository. Public sample diagnostics revealed that a broad time-proximity link could associate unrelated records with a case, so that link was removed in favor of direct identifiers, historical aliases bounded by audit time, and explicit resource identity links.
+
+Actions:
+* Committed the complete dataset corpus under dataset/; the submission ZIP continues to exclude the corpus.
+* Confirmed output schema, 518 rows, phase/operation ordering rules, and token usage report requirements against the problem statement.
+* Public sample after the first dataset-backed iteration measured 71.9% status accuracy and 15.6% exact-row accuracy; that iteration was affected by overbroad temporal evidence linkage.
+* Removed the risky temporal linkage and corrected the repository README. A new workflow run is generating and evaluating the revised output; final metrics will be reported after it completes.
+
+Context:
+tool=Codex desktop
+model=GPT-6
+branch=main
+repo_root=https://github.com/VedantSinare007/HackerRank_Vedant_Sinare
+parent_agent=none
