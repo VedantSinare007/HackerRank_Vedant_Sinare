@@ -59,6 +59,20 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Build per-request agent traces
+        run: python code/evaluation/build_traces.py --dataset dataset --predictions output.csv --output agent_traces.jsonl
+
+      - name: Package agent traces ZIP
+        run: zip agent-traces.zip agent_traces.jsonl code/evaluation/evaluation_report.md code/evaluation/usage_report.md
+
+      - name: Upload agent traces ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-traces.zip
+          path: agent-traces.zip
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Commit predictions and reports
         if: github.ref == 'refs/heads/main'
         run: |
