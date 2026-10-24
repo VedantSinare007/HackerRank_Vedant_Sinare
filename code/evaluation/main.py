@@ -92,6 +92,16 @@ def evaluate(dataset, predictions):
         report.append(f"| {name} | {str(exp).lower()} | {str(got).lower()} | {'PASS' if exp == got else 'FAIL'} |")
     report += ["", f"Custom intent cases passed: {custom_correct}/{len(custom_results)}.", "", "## Failures found", ""]
     report += failures if failures else ["- No public-sample mismatches were observed."]
+    report += ["", "## Public-sample case detail", ""]
+    for cid in ids:
+        er, ar = expected.get(cid, {}), actual.get(cid, {})
+        es, ass = parsed_steps(er), parsed_steps(ar)
+        if er.get("deletion_status") == ar.get("deletion_status") and es == ass:
+            continue
+        def sig(steps):
+            return [(s.get("phase"), s.get("system_id"), s.get("resource_id"),
+                     s.get("operation"), s.get("state"), s.get("evidence_id")) for s in steps]
+        report.append(f"- {cid}: expected {er.get('deletion_status')} {json.dumps(sig(es), ensure_ascii=False)}; predicted {ar.get('deletion_status')} {json.dumps(sig(ass), ensure_ascii=False)}")
     report += [
         "", "## Improvements made", "",
         "- Added case-insensitive resolution across current and audited historical identifiers.",
