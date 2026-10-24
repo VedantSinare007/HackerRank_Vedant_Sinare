@@ -16,6 +16,6 @@ The full run reads participant-facing CSV files and the evidence corpus from the
 ## Run totals
 
 - Requests processed: 518
-- Output status counts: COMPLETE=109, INCOMPLETE=327, NOT_APPLICABLE=82
+- Output status counts: NOT_APPLICABLE=518
 - Per-model totals: not applicable (no models used).
 - Overall totals: 0 calls, 0 input tokens, 0 output tokens, 0 tokens, $0.00 estimated cost.
