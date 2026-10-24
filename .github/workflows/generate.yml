@@ -1,0 +1,63 @@
+name: Generate and evaluate submission
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - output.csv
+      - code/evaluation/evaluation_report.md
+      - code/evaluation/usage_report.md
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out submission repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install media inspection dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils tesseract-ocr
+          python -m pip install --upgrade pip
+          python -m pip install pillow pytesseract pypdf
+
+      - name: Fetch participant-facing challenge dataset
+        run: git clone --depth 1 https://github.com/interviewstreet/hackerrank-orchestrate-october26.git upstream
+
+      - name: Generate predictions for every request
+        run: python code/main.py --dataset upstream/dataset --output output.csv
+
+      - name: Evaluate public sample and write reports
+        run: python code/evaluation/main.py --dataset upstream/dataset --predictions output.csv
+
+      - name: Package code without the dataset
+        run: zip -r code.zip README.md code -x "*/__pycache__/*" "*/.venv/*" "*/venv/*" "*/node_modules/*" "*/.git/*" "*.pyc"
+
+      - name: Upload code ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: code.zip
+          path: code.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Commit predictions and reports
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add output.csv code/evaluation/evaluation_report.md code/evaluation/usage_report.md
+          if ! git diff --cached --quiet; then
+            git commit -m "Generate deletion audit predictions and reports"
+            git push
+          fi
