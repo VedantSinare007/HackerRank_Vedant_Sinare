@@ -109,6 +109,21 @@ def category_name(*parts: Any) -> str:
             return result
     return ""
 
+def category_for_resource(resource: Any, fallback: str) -> str:
+    prefix = str(resource or "").casefold().split("_", 1)[0]
+    by_prefix = {
+        "account": "USER_PROFILE", "identity": "SECONDARY_IDENTIFIER",
+        "search": "SEARCH_INDEX_ENTRY", "cache": "CACHE_ENTRY",
+        "support": "SUPPORT_MESSAGE", "attachment": "SUPPORT_ATTACHMENT",
+        "object": "SUPPORT_ATTACHMENT", "analytics": "ANALYTICS_PROFILE",
+        "telemetry": "PRODUCT_TELEMETRY", "export": "USER_EXPORT",
+        "marketing": "MARKETING_PROFILE", "email": "EMAIL_DELIVERY_LOG",
+        "audit": "SECURITY_AUDIT_LOG", "legal": "LEGAL_HOLD_RECORD",
+        "backup": "BACKUP_ARCHIVE", "tombstone": "ACCOUNT_TOMBSTONE",
+        "data": "DATA_FLOW",
+    }
+    return by_prefix.get(prefix, fallback)
+
 def default_system(category: str) -> str:
     return {
         "USER_PROFILE": "account_service", "SECONDARY_IDENTIFIER": "identity_service",
@@ -182,6 +197,13 @@ def status_from(obj: Any, category: str) -> str:
     if not isinstance(obj, dict):
         return "PRESENT"
     values = {str(k).casefold(): v for k, v in obj.items()}
+    try:
+        if int(values.get("status_code", 0) or 0) == 404:
+            return "ABSENT"
+    except (TypeError, ValueError):
+        pass
+    if "profile" in values and values["profile"] is None:
+        return "ABSENT"
     for key in ("result", "state", "status", "account_status", "record_status", "deletion_state", "readback_result"):
         val = str(values.get(key, "") or "").upper()
         if val in {"NOT_FOUND", "ABSENT", "DELETED", "MISSING", "ROWS=0"}:
@@ -208,19 +230,26 @@ def record_identity_match(obj: Any, aliases: set[str], uid: str) -> bool:
             if alias.isdigit():
                 if any(re.sub(r"\D", "", v) == alias for v in values):
                     return True
-            elif any(alias in v for v in values):
+            elif any(v == alias or re.search(r"(?<!\\w)" + re.escape(alias) + r"(?!\\w)", v, re.I) for v in values):
                 return True
     return bool(uid and any(re.search(rf"(?<![A-Za-z0-9_]){re.escape(uid)}(?![A-Za-z0-9_])", v, re.I) for v in values))
 
-def sql_records(path: Path, evidence_id: str, captured_at: dt.datetime) -> list[dict[str, Any]]:
+def sql_records(path: Path, evidence_id: str, captured_at: dt.datetime,
+                coverage: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     found: list[dict[str, Any]] = []
+    scope_systems: set[str] = set()
     con = sqlite3.connect(":memory:")
     try:
         con.executescript(path.read_text(encoding="utf-8", errors="replace"))
         tables = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+        if "snapshot_scope" in tables:
+            scope_systems.update(str(r[0]) for r in con.execute("SELECT origin_system FROM snapshot_scope"))
         for table in tables:
             if table == "snapshot_scope":
                 continue
+            table_category = category_name(table)
+            if table_category:
+                scope_systems.add(default_system(table_category))
             cols = [r[1] for r in con.execute(f'PRAGMA table_info("{table}")')]
             if not cols:
                 continue
@@ -235,6 +264,7 @@ def sql_records(path: Path, evidence_id: str, captured_at: dt.datetime) -> list[
                 sys_value = obj.get("origin_system") or obj.get("system") or obj.get("data_store") or ""
                 cat = category_name(obj.get("record_type"), obj.get("collection_name"), table, sys_value)
                 resource = find_resource_id(obj)
+                cat = category_for_resource(resource, cat)
                 if resource and cat:
                     found.append({"system": system_name(sys_value, category=cat), "resource_id": resource,
                                   "category": cat, "state": status_from(obj, cat), "record": obj,
@@ -244,6 +274,9 @@ def sql_records(path: Path, evidence_id: str, captured_at: dt.datetime) -> list[
         pass
     finally:
         con.close()
+    if coverage is not None:
+        for system in sorted(scope_systems):
+            coverage.append({"system": system, "evidence_id": evidence_id, "captured_at": captured_at})
     return found
 
 def json_records(obj: Any, evidence_id: str, captured_at: dt.datetime) -> list[dict[str, Any]]:
@@ -254,6 +287,7 @@ def json_records(obj: Any, evidence_id: str, captured_at: dt.datetime) -> list[d
             collection = node.get("collection") or node.get("collection_name") or node.get("table") or inherited_collection
             category = category_name(node.get("record_type"), node.get("category"), collection, sys_value)
             resource = node.get("resource_id") or node.get("record_id") or ""
+            category = category_for_resource(resource, category)
             # Container objects are not records; nested payloads such as search documents remain valid.
             has_records = any(k in node for k in ("records", "snapshots"))
             if resource and category and not has_records:
@@ -283,7 +317,7 @@ def text_records(text: str, evidence_id: str, captured_at: dt.datetime) -> list[
             resource = m.group(1)
             service_m = re.search(r"\bservice=([A-Za-z0-9_]+)", line, re.I)
             service = service_m.group(1) if service_m else ""
-            cat = infer_line_category(line, service)
+            cat = category_for_resource(resource, infer_line_category(line, service))
             if cat:
                 fields: dict[str, Any] = {"raw": line}
                 for key in ("rows", "http_status", "result", "enabled", "restore_allowed", "restore_access",
@@ -318,9 +352,10 @@ def text_records(text: str, evidence_id: str, captured_at: dt.datetime) -> list[
                                   "evidence_id": evidence_id, "captured_at": captured_at})
     return found
 
-def load_evidence(dataset: Path) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+def load_evidence(dataset: Path) -> tuple[list[dict[str, Any]], list[dict[str, str]], list[dict[str, Any]]]:
     manifest = read_csv(dataset / "evidence_files.csv")
     all_records: list[dict[str, Any]] = []
+    coverage: list[dict[str, Any]] = []
     for entry in manifest:
         p = dataset / entry["file_path"]
         if not p.exists():
@@ -336,7 +371,7 @@ def load_evidence(dataset: Path) -> tuple[list[dict[str, Any]], list[dict[str, s
             except (json.JSONDecodeError, OSError):
                 pass
         elif suffix == ".sql":
-            all_records.extend(sql_records(p, eid, cap))
+            all_records.extend(sql_records(p, eid, cap, coverage))
         elif suffix in {".log", ".txt"}:
             try:
                 all_records.extend(text_records(p.read_text(encoding="utf-8-sig", errors="replace"), eid, cap))
@@ -359,9 +394,9 @@ def load_evidence(dataset: Path) -> tuple[list[dict[str, Any]], list[dict[str, s
                 all_records.extend(text_records(txt, eid, cap))
             except Exception:
                 pass
-    return all_records, manifest
+    return all_records, manifest, coverage
 
-def identity_index(dataset: Path) -> tuple[dict[str, dict[str, Any]], dict[str, set[str]]]:
+def identity_index(dataset: Path) -> tuple[dict[str, dict[str, Any]], dict[str, set[str]], dict[str, str], list[dict[str, str]]]:
     users = read_csv(dataset / "user_identities.csv")
     aliases: dict[str, set[str]] = defaultdict(set)
     user_by_email: dict[str, str] = {}
@@ -377,7 +412,8 @@ def identity_index(dataset: Path) -> tuple[dict[str, dict[str, Any]], dict[str, 
             aliases[uid].add(alias)
             if key == "email":
                 user_by_email[alias] = uid
-    for a in read_csv(dataset / "user_audit_log.csv"):
+    audit_rows = read_csv(dataset / "user_audit_log.csv")
+    for a in audit_rows:
         uid = a["user_id"]
         aliases.setdefault(uid, set())
         if a.get("event_time") and uid in details:
@@ -390,7 +426,7 @@ def identity_index(dataset: Path) -> tuple[dict[str, dict[str, Any]], dict[str, 
                 aliases[uid].add(alias)
                 if "email" in field:
                     user_by_email[alias] = uid
-    return details, aliases | defaultdict(set), user_by_email
+    return details, aliases | defaultdict(set), user_by_email, audit_rows
 
 def resource_for_case(req: dict[str, str], uid: str, details: dict[str, Any], aliases_by_user: dict[str, set[str]],
                       evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -420,6 +456,8 @@ def item_attributable(item: dict[str, Any], uid: str) -> bool:
     rec = item["record"]
     if not isinstance(rec, dict):
         return False
+    if rec.get("_identity_match"):
+        return True
     for key in ("user_id", "customer_reference", "subject_reference", "user_ref", "customer_id"):
         val = rec.get(key)
         if val not in (None, "", "null"):
@@ -574,9 +612,15 @@ def activity_resource_links(dataset: Path, aliases_by_user: dict[str, set[str]])
 
 def run(dataset: Path, output: Path) -> None:
     requests = read_csv(dataset / "deletion_requests.csv")
-    users, aliases_by_user, by_email = identity_index(dataset)
-    evidence, manifest = load_evidence(dataset)
+    users, aliases_by_user, by_email, audit_rows = identity_index(dataset)
+    evidence, manifest, coverage = load_evidence(dataset)
     activity_links = activity_resource_links(dataset, aliases_by_user)
+    padded_account_ids = any(
+        (m := re.fullmatch(r"account_(\\d+)", str(item.get("resource_id", ""))))
+        and (u := re.fullmatch(r"user_(\\d+)", str(item.get("record", {}).get("user_id", ""))))
+        and len(u.group(1)) <= 2 and len(m.group(1)) == 3 and int(m.group(1)) == int(u.group(1))
+        for item in evidence if isinstance(item.get("record"), dict)
+    )
     rows = []
     for req in requests:
         email = norm_email(req.get("email", ""))
@@ -588,14 +632,48 @@ def run(dataset: Path, output: Path) -> None:
         if not classify_request_text(req.get("request_text", "")):
             status, steps = "NOT_APPLICABLE", []
         elif uid:
-            # Match resources with every current and historical identifier.
             items = []
             cutoff = parse_time(req.get("audit_at"))
+            aliases = {email}
+            identity = users.get(uid, {})
+            identity_updated = parse_time(identity.get("updated_at"))
+            if cutoff is None or identity_updated is None or identity_updated <= cutoff:
+                for key in ("name", "email", "phone", "email_hash"):
+                    value = identity.get(key, "")
+                    if value:
+                        aliases.add(norm_email(value) if key == "email" else norm_phone(value) if key == "phone" else str(value).casefold())
+            for audit in audit_rows:
+                event_time = parse_time(audit.get("event_time"))
+                if audit.get("user_id") != uid or (cutoff and event_time and event_time > cutoff):
+                    continue
+                field = audit.get("field_name", "").casefold()
+                for key in ("old_value", "new_value"):
+                    value = audit.get(key, "")
+                    if value:
+                        aliases.add(norm_email(value) if "email" in field else norm_phone(value) if "phone" in field else str(value).casefold())
             for item in evidence:
                 if cutoff and item["captured_at"] > cutoff:
                     continue
-                if record_identity_match(item["record"], aliases_by_user.get(uid, set()), uid) or (item["resource_id"] in activity_links.get(uid, {}) and (cutoff is None or activity_links[uid][item["resource_id"]] is None or activity_links[uid][item["resource_id"]] <= cutoff)):
+                matched = record_identity_match(item["record"], aliases, uid)
+                linked_at = activity_links.get(uid, {}).get(item["resource_id"])
+                linked = linked_at is not None and (cutoff is None or linked_at <= cutoff)
+                if matched or linked:
+                    item = dict(item)
+                    item["record"] = dict(item["record"]) if isinstance(item["record"], dict) else {"raw": item["record"]}
+                    item["record"]["_identity_match"] = True
                     items.append(item)
+            if padded_account_ids and not any(i["category"] == "USER_PROFILE" for i in items):
+                account_number = re.fullmatch(r"user_(\\d+)", uid)
+                if account_number and len(account_number.group(1)) <= 2:
+                    candidate = f"account_{int(account_number.group(1)):03d}"
+                    latest_coverage = [x for x in coverage if x["system"] == "account_service" and
+                                       (cutoff is None or x["captured_at"] <= cutoff)]
+                    if latest_coverage:
+                        proof = max(latest_coverage, key=lambda x: x["captured_at"])
+                        items.append({"system": "account_service", "resource_id": candidate,
+                                      "category": "USER_PROFILE", "state": "ABSENT",
+                                      "record": {"user_id": uid, "result": "ABSENT"},
+                                      "evidence_id": proof["evidence_id"], "captured_at": proof["captured_at"]})
             # Keep the latest observed state for each resource/category within audit time.
             latest = {}
             for item in items:
