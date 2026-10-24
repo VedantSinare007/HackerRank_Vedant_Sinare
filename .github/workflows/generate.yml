@@ -10,6 +10,10 @@ on:
       - code/evaluation/usage_report.md
   workflow_dispatch:
 
+concurrency:
+  group: deletion-audit-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -63,5 +67,6 @@ jobs:
           git add dataset output.csv code/evaluation/evaluation_report.md code/evaluation/usage_report.md
           if ! git diff --cached --quiet; then
             git commit -m "Generate deletion audit predictions and reports"
+            git pull --rebase origin main
             git push
           fi
