@@ -28,6 +28,7 @@ POSITIVE_INTENT = re.compile(
     r"close my account|close this account|close the account|closed account|account closure|account.*close|"
     r"permanent account|permanently close|account.*(?:deleted|removed|erased|closed)|"
     r"wipe my account|clean .* personal details|clean .* personal data|"
+    r"(?:account|profile).{0,80}\\b(?:gone|not found|no longer exists|fully removed)\\b|"
     r"eliminaci[oó]n|eliminar mi cuenta|suprimir mi cuenta|"
     r"exclus[aã]o|excluir minha conta|elimina[cç][aã]o|"
     r"suppression définitive|suppression d[eû]finitive|supprimer mon compte|"
@@ -114,7 +115,8 @@ def category_for_resource(resource: Any, fallback: str) -> str:
     by_prefix = {
         "account": "USER_PROFILE", "identity": "SECONDARY_IDENTIFIER",
         "search": "SEARCH_INDEX_ENTRY", "cache": "CACHE_ENTRY",
-        "support": "SUPPORT_MESSAGE", "attachment": "SUPPORT_ATTACHMENT",
+        "support": "SUPPORT_ATTACHMENT" if fallback == "SUPPORT_ATTACHMENT" else "SUPPORT_MESSAGE",
+        "attachment": "SUPPORT_ATTACHMENT",
         "object": "SUPPORT_ATTACHMENT", "analytics": "ANALYTICS_PROFILE",
         "telemetry": "PRODUCT_TELEMETRY", "export": "USER_EXPORT",
         "marketing": "MARKETING_PROFILE", "email": "EMAIL_DELIVERY_LOG",
@@ -476,6 +478,30 @@ def item_retained(item: dict[str, Any], audit_at: str) -> bool:
     audit = parse_time(audit_at)
     return item["state"] != "ABSENT" and (until is None or audit is None or until >= audit)
 
+def support_shared_context(record: Any) -> bool:
+    if not isinstance(record, dict):
+        return False
+    shared_keys = {"shared_customer", "other_customer_reference", "other_customer_id",
+                   "shared_order_context", "conversation_must_be_retained", "retain_conversation",
+                   "shared_context", "order_context"}
+    def walk(value: Any) -> bool:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                key_norm = str(key).casefold()
+                value_norm = str(item).casefold()
+                if key_norm in shared_keys and value_norm not in {"", "0", "false", "none", "null"}:
+                    return True
+                if key_norm in {"raw", "message_excerpt", "context", "notes"} and re.search(
+                    r"shared customer|another customer|order context|must be retained", value_norm, re.I
+                ):
+                    return True
+                if walk(item):
+                    return True
+        elif isinstance(value, list):
+            return any(walk(x) for x in value)
+        return False
+    return walk(record)
+
 def desired_operation(item: dict[str, Any], uid: str, audit_at: str) -> tuple[str | None, str | None, bool]:
     cat, state = item["category"], item["state"]
     exists = state not in {"ABSENT", "NOT_FOUND", "MISSING"}
@@ -495,9 +521,11 @@ def desired_operation(item: dict[str, Any], uid: str, audit_at: str) -> tuple[st
                 return "REPORT_EXPOSED_PII", "REDACT_RECORD", True
             return None, None, exists
         if cat == "SUPPORT_MESSAGE":
-            if exists and (pii or state == "IDENTIFIABLE"):
-                return "REPORT_EXPOSED_PII", "REDACT_RECORD", True
-            return None, None, exists
+            if exists:
+                if support_shared_context(item["record"]) and (pii or state == "IDENTIFIABLE"):
+                    return "REPORT_EXPOSED_PII", "REDACT_RECORD", True
+                return "REPORT_REMAINING_RECORD", "DELETE_RECORD", True
+            return None, None, False
         if exists and (pii or state == "IDENTIFIABLE"):
             return "REPORT_EXPOSED_PII", "REDACT_RECORD", True
         return None, None, exists
@@ -528,7 +556,13 @@ def verification(item: dict[str, Any], uid: str, audit_at: str) -> tuple[str, st
         return ("VERIFY_RECORD_ABSENT", "ABSENT")
     if cat == "ACCOUNT_TOMBSTONE":
         return ("VERIFY_RECORD_REDACTED", "REDACTED")
-    if cat in {"SUPPORT_MESSAGE", "EMAIL_DELIVERY_LOG"}:
+    if cat == "SUPPORT_MESSAGE":
+        if exists and support_shared_context(item["record"]):
+            return ("VERIFY_RECORD_REDACTED", "REDACTED")
+        if exists:
+            return ("VERIFY_RECORD_ABSENT", "ABSENT")
+        return None
+    if cat == "EMAIL_DELIVERY_LOG":
         if exists:
             return ("VERIFY_RECORD_REDACTED", "REDACTED")
         return None
@@ -610,6 +644,25 @@ def activity_resource_links(dataset: Path, aliases_by_user: dict[str, set[str]])
                     linked[uid][row["resource_id"]] = parse_time(row.get("event_time"))
     return linked
 
+def nearby_activity_resources(dataset: Path, req: dict[str, str]) -> set[str]:
+    """Link records to a request through nearby deletion-workflow events; never trust their outcome as state."""
+    reported = parse_time(req.get("reported_at"))
+    cutoff = parse_time(req.get("audit_at"))
+    if reported is None:
+        return set()
+    allowed = {"DELETE_RECORD", "ANONYMIZE_RECORD", "REDACT_RECORD",
+               "DISABLE_DATA_FLOW", "BLOCK_RESTORE", "CHECK_DATA_FLOW", "CHECK_RESTORE_ACCESS"}
+    linked: set[str] = set()
+    for row in read_csv(dataset / "system_activity.csv"):
+        if row.get("event_type") not in allowed or not row.get("resource_id"):
+            continue
+        when = parse_time(row.get("event_time"))
+        if when is None or (cutoff and when > cutoff):
+            continue
+        if abs((when - reported).total_seconds()) <= 7200:
+            linked.add(row["resource_id"])
+    return linked
+
 def run(dataset: Path, output: Path) -> None:
     requests = read_csv(dataset / "deletion_requests.csv")
     users, aliases_by_user, by_email, audit_rows = identity_index(dataset)
@@ -634,6 +687,7 @@ def run(dataset: Path, output: Path) -> None:
         elif uid:
             items = []
             cutoff = parse_time(req.get("audit_at"))
+            nearby_resources = nearby_activity_resources(dataset, req)
             aliases = {email}
             identity = users.get(uid, {})
             identity_updated = parse_time(identity.get("updated_at"))
@@ -657,10 +711,12 @@ def run(dataset: Path, output: Path) -> None:
                 matched = record_identity_match(item["record"], aliases, uid)
                 linked_at = activity_links.get(uid, {}).get(item["resource_id"])
                 linked = linked_at is not None and (cutoff is None or linked_at <= cutoff)
-                if matched or linked:
+                temporal_link = item["resource_id"] in nearby_resources
+                if matched or linked or temporal_link:
                     item = dict(item)
                     item["record"] = dict(item["record"]) if isinstance(item["record"], dict) else {"raw": item["record"]}
-                    item["record"]["_identity_match"] = True
+                    if matched or linked:
+                        item["record"]["_identity_match"] = True
                     items.append(item)
             if padded_account_ids and not any(i["category"] == "USER_PROFILE" for i in items):
                 account_number = re.fullmatch(r"user_(\d+)", uid)
