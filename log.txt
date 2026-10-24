@@ -28,3 +28,27 @@ branch=main
 repo_root=https://github.com/VedantSinare007/HackerRank_Vedant_Sinare
 worktree=GitHub repository
 parent_agent=none
+
+
+## [2026-10-24T16:16:00Z] Full run, evaluation, and classifier repair
+
+User Prompt (verbatim, secrets redacted):
+The user asked to clone the Ghost Data Still Exists challenge repository and do all activity in their GitHub account.
+
+Agent Response Summary:
+Built and ran the deterministic evidence-driven deletion audit against the full participant-facing corpus. The initial public-sample evaluation exposed weak performance and a regex escaping defect; repaired the intent classifier and reran the full workflow. The latest workflow succeeded and published predictions and the code ZIP artifact.
+
+Actions:
+* Added and ran a GitHub Actions workflow that fetches the public challenge dataset, generates output.csv for all 518 requests, evaluates against the 32 public sample labels, writes evaluation and usage reports, packages code.zip without the dataset, and commits the results.
+* Improved multilingual and inflected deletion-intent detection after evaluation.
+* Latest public-sample results: status accuracy 22/32 (68.8%); exact row accuracy 15.6%; custom intent cases 5/5.
+* Latest full output distribution: COMPLETE=124, INCOMPLETE=390, NOT_APPLICABLE=4.
+* Kept the supplied dataset and evidence corpus out of the submission repository and code ZIP.
+* Recorded that public-sample sequence accuracy remains limited and hidden labels are unavailable.
+
+Context:
+tool=Codex desktop
+model=GPT-6
+branch=main
+repo_root=https://github.com/VedantSinare007/HackerRank_Vedant_Sinare
+parent_agent=none
