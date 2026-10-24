@@ -24,15 +24,15 @@ REMED_ORDER = {"DISABLE_DATA_FLOW": 0, "BLOCK_RESTORE": 1, "DELETE_RECORD": 2, "
 VERIFY_ORDER = {"VERIFY_RECORD_ABSENT": 0, "VERIFY_RECORD_PRESENT": 1, "VERIFY_RECORD_REDACTED": 2, "VERIFY_RECORD_ANONYMIZED": 3, "VERIFY_DATA_FLOW_DISABLED": 4, "VERIFY_RESTORE_BLOCKED": 5}
 
 POSITIVE_INTENT = re.compile(
-    r"\b(delete|deletion|deleted|erase|erased|erasure|remove|removed|removal|"
+    r"(delet\\w*|eras\\w*|remov\\w*|)
     r"remove my account|remove this account|remove the account|remove my profile|remove the profile|"
-    r"remove my personal data|remove personal data|close my account|close this account|closed account|"
+    r"remove my personal data|remove personal data|close my account|close this account|close the account|closed account|account.*close|"
     r"permanent account|permanently close|account closure|account.*(?:deleted|removed|erased|closed)|"
     r"wipe my account|clean .* personal details|clean .* personal data|"
     r"eliminaci[oó]n|eliminar mi cuenta|suprimir mi cuenta|"
     r"exclus[aã]o|excluir minha conta|elimina[cç][aã]o|"
     r"suppression définitive|suppression d[eû]finitive|supprimer mon compte|"
-    r"삭제|계정 삭제|削除|アカウント.*削除|删除|注销账户)\b",
+    r"삭제|계정 삭제|削除|アカウント.*削除|删除|注销账户)",
     re.IGNORECASE,
 )
 NON_DELETE_ONLY = re.compile(
